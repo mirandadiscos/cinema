@@ -64,27 +64,56 @@ def _save_enriched_data(enriched_df: pd.DataFrame, output_path: str) -> None:
     logger.info(f"Successfully saved {len(enriched_df)} enriched records")
 
 
-def _load_existing_enriched_data(enriched_path: str) -> pd.DataFrame | None:
+def _get_new_movies(source_df: pd.DataFrame, enriched_path: str) -> pd.DataFrame:
     """
-    Loads existing enriched data if available.
+    Identifies new movies by comparing URIs.
     
     Args:
-        enriched_path (str): Path to the enriched CSV file
+        source_df (pd.DataFrame): New source data
+        enriched_path (str): Path to existing enriched data
     
     Returns:
-        pd.DataFrame: Enriched data if file exists, None otherwise
+        pd.DataFrame: Only rows with URIs not yet in enriched data
     """
     if not os.path.exists(enriched_path):
-        return None
+        logger.info("No existing enriched data. Processing all movies.")
+        return source_df
     
-    logger.info(f"Loading existing enriched data from: {enriched_path}")
     enriched_df = pd.read_csv(enriched_path)
-    logger.info(f"Loaded {len(enriched_df)} existing enriched records")
-    return enriched_df
+    processed_uris = set(enriched_df['Letterboxd URI'].unique())
+    
+    new_movies = source_df[~source_df['Letterboxd URI'].isin(processed_uris)]
+    logger.info(f"Found {len(new_movies)} new movies to process ({len(source_df)} total in source)")
+    
+    return new_movies
+
+
+def _combine_enriched_data(new_enriched_df: pd.DataFrame, enriched_path: str) -> pd.DataFrame:
+    """
+    Combines newly enriched data with existing enriched data.
+    
+    Args:
+        new_enriched_df (pd.DataFrame): Newly enriched movies
+        enriched_path (str): Path to existing enriched data
+    
+    Returns:
+        pd.DataFrame: Combined data with duplicates removed (keeps existing)
+    """
+    if not os.path.exists(enriched_path):
+        return new_enriched_df
+    
+    existing_df = pd.read_csv(enriched_path)
+    combined_df = pd.concat([existing_df, new_enriched_df], ignore_index=True)
+    
+    combined_df = combined_df.drop_duplicates(subset=['Letterboxd URI'], keep='first')
+    logger.info(f"Combined data: {len(combined_df)} total enriched records")
+    
+    return combined_df
 
 def process_and_save_data() -> None:
     """
     Main orchestration function for loading, enriching, and saving data.
+    Only processes new movies not yet in enriched data.
     
     Raises:
         EnvironmentError: If TMDB_API_KEY is not set
@@ -95,11 +124,17 @@ def process_and_save_data() -> None:
         _check_api_key()
         source_df = _load_source_data(SOURCE_DATA_PATH)
         
-        logger.info("Starting data enrichment process...")
-        enriched_df = enrich_dataframe(source_df)
-        logger.info("Enrichment complete.")
+        new_movies = _get_new_movies(source_df, ENRICHED_DATA_PATH)
         
-        _save_enriched_data(enriched_df, ENRICHED_DATA_PATH)
+        if len(new_movies) == 0:
+            logger.info("No new movies to process.")
+            return
+        
+        logger.info(f"Enriching {len(new_movies)} new movies...")
+        new_enriched_df = enrich_dataframe(new_movies)
+        
+        combined_df = _combine_enriched_data(new_enriched_df, ENRICHED_DATA_PATH)
+        _save_enriched_data(combined_df, ENRICHED_DATA_PATH)
         
     except (FileNotFoundError, ValueError, EnvironmentError) as e:
         logger.error(f"Process error: {e}")
@@ -112,13 +147,9 @@ def process_and_save_data() -> None:
 def main() -> None:
     """
     Entry point for the data processing application.
-    Checks for existing enriched data before running enrichment.
+    Processes only new movies not yet in enriched data.
     """
-    if _load_existing_enriched_data(ENRICHED_DATA_PATH) is not None:
-        logger.info("Using existing enriched data.")
-        return
-    
-    logger.info("Starting data enrichment process.")
+    logger.info("Starting incremental data enrichment process.")
     try:
         process_and_save_data()
     except Exception as e:

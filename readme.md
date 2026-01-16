@@ -54,6 +54,30 @@ Para garantir que a lógica de processamento está funcionando corretamente (sem
 python -m unittest data_processing/test_enrich_data.py
 ```
 
+## Processamento Incremental
+
+O sistema usa uma estratégia inteligente de processamento incremental:
+
+- **Compara URIs** do novo `reviews.csv` com filmes já enriquecidos em `enriched_data.csv`
+- **Processa apenas novos filmes**, evitando chamadas desnecessárias à API
+- **Mantém histórico completo**, reutilizando dados já processados
+
+### Exemplo:
+
+```
+1º Processamento: reviews.csv com [Inception, Dark Knight]
+   → Ambos enriquecidos via API
+   → Salvos em enriched_data.csv
+
+2º Processamento: novo reviews.csv com [Inception, Dark Knight, Interstellar]
+   → Inception: JÁ EXISTE, reutilizado ✓
+   → Dark Knight: JÁ EXISTE, reutilizado ✓
+   → Interstellar: NOVO, processado via API
+   → Resultado: 3 filmes em enriched_data.csv
+```
+
+**Ganho de Performance:** Apenas novos filmes são consultados na API TMDb!
+
 <details>
 <summary><strong>Detalhes do Projeto e Próximos Passos</strong></summary>
 
